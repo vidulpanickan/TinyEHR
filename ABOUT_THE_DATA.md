@@ -1,23 +1,24 @@
 # About the Data
 
-TinyEHR is derived from the MIMIC-IV Clinical Database Demo v2.2 (Johnson et al., 2023) and the MIMIC-IV Demo Data in the OMOP Common Data Model v0.9. The OMOP CDM is a standardized data model for observational health data maintained by OHDSI (Observational Health Data Sciences and Informatics). This document describes every transformation applied to the original data and the reasoning behind each decision.
+TinyEHR is derived from the MIMIC-IV Clinical Database Demo v2.2 (Johnson et al., 2023) and the MIMIC-IV Demo Data in the OMOP Common Data Model v0.9. This document describes every transformation applied to the original data and the reasoning behind each decision.
 
 TinyEHR ships in two formats:
 
-**MIMIC format**: Matches the original MIMIC-IV Demo exactly in column names, data types, and values, with two transformations (date shifting and ICD code formatting) and one addition (synthetic clinical notes). Scripts written for MIMIC-IV Demo work with TinyEHR without modification.
+**MIMIC format**: Matches the original MIMIC-IV Demo exactly in column names, data types, and values, with two transformations (date shifting and ICD code formatting) and one addition (clinical notes generated from patient profiles). Scripts written for MIMIC-IV Demo work with TinyEHR without modification.
 
-**OMOP format**: Uses the OHDSI MIMIC-to-OMOP reference data as-is, with date shifting and synthetic note insertion. ICD (International Classification of Diseases) codes in OMOP `source_value` fields are stored without decimals, following the OMOP convention of preserving the original billing/claims format.
+**OMOP format**: Uses the OHDSI MIMIC-to-OMOP reference data as-is, with date shifting and generated clinical notes. ICD codes in OMOP `source_value` fields are stored without decimals, following the OMOP convention of preserving the original billing/claims format.
 
 ---
 
 ## What Changed
 
-### 1. Date Shifting
+<details>
+<summary><b>1. Date Shifting</b></summary>
 
-The original MIMIC-IV Demo uses synthetic dates in the 2100+ range to protect patient privacy. TinyEHR shifts these to realistic but fictional years (2010s-2020s) for easier use in teaching and prototyping.
+The original MIMIC-IV Demo uses shifted dates in the 2100+ range to protect patient privacy. TinyEHR shifts these to realistic but fictional years (2010s-2020s) for easier use in teaching and prototyping.
 
 **How it works:**
-- Each patient's `anchor_year_group` (a MIMIC field giving a 3-year range around the patient's true admission year, e.g., "2011 - 2013") is used to select a random real year
+- Each patient's `anchor_year_group` (a MIMIC field indicating the 3-year range in which the patient's `anchor_year` actually occurred, e.g., "2011 - 2013") is used to select a random real year
 - A per-patient year offset is computed: `offset = original_anchor_year - real_year`
 - All date and datetime columns are shifted backward by this offset
 - Leap year edge cases are handled (Feb 29 becomes Feb 28 when the target year is not a leap year)
@@ -27,9 +28,12 @@ The original MIMIC-IV Demo uses synthetic dates in the 2100+ range to protect pa
 
 **Tables modified (OMOP format):** visit_occurrence, visit_detail, condition_occurrence, procedure_occurrence, drug_exposure, device_exposure, measurement, observation, death, observation_period, specimen, condition_era, drug_era, dose_era, person (year_of_birth)
 
-### 2. ICD Code Formatting (MIMIC format only)
+</details>
 
-ICD codes are the standard classification system used worldwide to record diagnoses and procedures. The original MIMIC-IV Demo stores these codes without decimal points (e.g., `4139` instead of `413.9`). TinyEHR's MIMIC format inserts decimal points to match how codes appear in clinical practice, EHR systems, medical coding textbooks, and official CDC (Centers for Disease Control) / WHO code listings.
+<details>
+<summary><b>2. ICD Code Formatting (MIMIC format only)</b></summary>
+
+ICD codes are the standard classification system used worldwide to record diagnoses and procedures. The original MIMIC-IV Demo stores these codes without decimal points (e.g., `4139` instead of `413.9`). TinyEHR's MIMIC format inserts decimal points to match how codes appear in clinical practice, EHR systems, and medical coding textbooks.
 
 | Code System | Rule | Example | Source |
 |---|---|---|---|
@@ -46,30 +50,27 @@ ICD codes are the standard classification system used worldwide to record diagno
 > [!NOTE]
 > **Why OMOP format does not add decimal points**
 >
-> The OMOP CDM convention is that `source_value` fields store codes exactly as they appear in the source system. In billing and claims data, ICD codes are submitted without decimal points because CMS (Centers for Medicare & Medicaid Services) requires this on claim forms. This means the same diagnosis appears differently in each format:
+> The OMOP CDM convention is that `source_value` fields store codes exactly as they appear in the source system. In billing and claims data, ICD codes are submitted without decimal points because CMS requires this on claim forms. This means the same diagnosis appears differently in each format:
 
 | Format | Example | Convention |
 |--------|---------|------------|
 | TinyEHR MIMIC | `413.9` | Clinical display (textbooks, EHR systems) |
 | TinyEHR OMOP | `4139` | Billing/claims format (CMS, Medicare) |
 
-> [!TIP]
-> This is intentional and reflects a real-world difference that learners will encounter when working with clinical vs billing data.
+</details>
 
-### 3. Synthetic Clinical Notes
+<details>
+<summary><b>3. Clinical Notes</b></summary>
 
-The original MIMIC-IV Demo does not include clinical notes. TinyEHR adds 4,580 synthetic notes generated using a large language model, grounded in each patient's demographics, diagnoses, and admission data.
+The original MIMIC-IV Demo does not include clinical notes. TinyEHR adds 4,580 clinical notes generated using Anthropic's Claude Opus 4.6, grounded in each patient's demographics, diagnoses, and admission data during their hospital visit.
 
 **14 note types:** Discharge summary (275), Physician (1,249), Nursing (1,249), Radiology (332), Nursing/other (314), ECG (246), Rehab Services (203), Respiratory (193), Echo (128), General (128), Case Management (109), Nutrition (68), Social Work (51), Consult (35)
 
-**MIMIC format:** Added as `noteevents.csv` in `tinyehr_mimic_format/notes/` with columns: `note_id`, `subject_id`, `hadm_id`, `note_type`, `chartdate`, `charttime`, `text`. Each `note_id` follows the MIMIC-IV convention: `{subject_id}-{type_code}-{sequence}` (e.g., `10000032-DS-0001`).
+**MIMIC format:** Added as `noteevents.csv` with columns: `note_id`, `subject_id`, `hadm_id`, `note_type`, `chartdate`, `charttime`, `text`. Each `note_id` follows the MIMIC-IV convention: `{subject_id}-{type_code}-{sequence}` (e.g., `10000032-DS-0001`).
 
-**OMOP format:** Mapped to the `note` table with proper concept IDs:
-- `note_type_concept_id` uses OMOP Note Type vocabulary. Concept IDs are standardized numeric identifiers that map local codes to universal meanings (e.g., 44814637 = Discharge summary)
-- `note_class_concept_id` uses LOINC (Logical Observation Identifiers Names and Codes) Document Ontology (e.g., 706531 = Discharge summary, 706550 = Progress)
-- `encoding_concept_id` = 32678 (UTF-8), `language_concept_id` = 4180186 (English)
+**OMOP format:** Mapped to the `note` table with proper concept IDs for note type and document class. 19 concepts added from the Athena OMOP vocabulary (10 Note Type, 7 LOINC Document Ontology, 2 utility), increasing `2b_concept.csv` from 3,885 to 3,904 rows.
 
-The MIMIC-IV OMOP distribution does not include note-related concept IDs because its note table is empty. TinyEHR adds 19 concepts from the [Athena](https://athena.ohdsi.org/) OMOP vocabulary (OHDSI's standard vocabulary browser and download service) (10 Note Type, 7 LOINC Document Ontology, 2 utility), increasing `2b_concept.csv` from 3,885 to 3,904 rows.
+</details>
 
 ---
 
@@ -131,7 +132,7 @@ The MIMIC-IV OMOP distribution does not include note-related concept IDs because
 
 | Table | Rows | Description |
 |-------|------|-------------|
-| noteevents | 4,580 | Synthetic clinical notes (14 types) |
+| noteevents | 4,580 | Clinical notes (14 types) |
 
 **Total: 33 tables, 100 patients, 275 admissions, 140 ICU stays**
 
@@ -150,7 +151,7 @@ The MIMIC-IV OMOP distribution does not include note-related concept IDs because
 | device_exposure | 3,855 | Medical device usage |
 | measurement | 338,550 | Labs and vitals (mapped to LOINC) |
 | observation | 31,390 | Clinical observations |
-| note | 4,580 | Synthetic clinical notes |
+| note | 4,580 | Clinical notes |
 | specimen | 150 | Biological specimens |
 | condition_era | 3,771 | Grouped condition periods |
 | drug_era | 7,931 | Grouped drug exposure periods |
@@ -173,7 +174,8 @@ These tables are part of the standard OMOP CDM table structure and are included 
 
 ## Design Decisions
 
-### OMOP Procedure Codes Are Not ICD
+<details>
+<summary><b>OMOP Procedure Codes Are Not ICD</b></summary>
 
 The OHDSI MIMIC-to-OMOP ETL does not carry ICD-9 procedure codes into `procedure_occurrence.procedure_source_value`. Despite the original MIMIC-IV Demo containing 401 ICD-9 procedure rows in `procedures_icd`, the OHDSI ETL maps procedures to standard vocabularies:
 
@@ -185,7 +187,10 @@ The OHDSI MIMIC-to-OMOP ETL does not carry ICD-9 procedure codes into `procedure
 
 TinyEHR does not modify any `source_value` fields in the OMOP format.
 
-### OMOP condition_source_value Contains Mixed Data Types
+</details>
+
+<details>
+<summary><b>OMOP condition_source_value Contains Mixed Data Types</b></summary>
 
 The `condition_occurrence.condition_source_value` column in the OHDSI reference contains a mix of data types, not just ICD codes:
 
@@ -197,9 +202,12 @@ The `condition_occurrence.condition_source_value` column in the OHDSI reference 
 
 The rhythm entries come from ICU bedside charting (chartevents). The OHDSI ETL maps these into `condition_occurrence` as observed clinical states. TinyEHR does not modify these values.
 
-### Medical Codes Stored as Strings
+</details>
 
-Medical codes (ICD, NDC, CPT, LOINC) are stored as strings in Parquet (a columnar file format optimized for data analysis) to preserve leading zeros and formatting. For example, `009.0` stored as float becomes `9.0`, and NDC `00002751001` stored as integer loses the leading zeros.
+<details>
+<summary><b>Medical Codes Stored as Strings</b></summary>
+
+Medical codes (ICD, NDC, CPT, LOINC) are stored as strings in Parquet to preserve leading zeros and formatting. For example, `009.0` stored as float becomes `9.0`, and NDC `00002751001` stored as integer loses the leading zeros.
 
 | Code Type | Data Type | Why |
 |---|---|---|
@@ -211,22 +219,36 @@ Medical codes (ICD, NDC, CPT, LOINC) are stored as strings in Parquet (a columna
 
 Numeric identifiers (`concept_id`, `person_id`, `subject_id`) remain as integers.
 
+</details>
 
-### Nullable Int64 for OMOP IDs
+<details>
+<summary><b>Nullable Int64 for OMOP IDs</b></summary>
 
 OMOP uses 64-bit hashed IDs (e.g., `person_id = 3589912774911670296`). Some ID columns allow nulls. When pandas reads a CSV column with integers + nulls, it defaults to `float64`, which only has 53 bits of precision, silently corrupting large IDs. TinyEHR's Parquet export uses pandas `Int64` (nullable integer) to preserve full 64-bit precision.
 
 > [!WARNING]
 > **For CSV users:** Load with `dtype=str` or specify `dtype={'column_name': 'Int64'}` for ID columns. The Parquet format does not have this issue.
 
-### OMOP Visit Count (852 vs 275)
+</details>
 
-> [!NOTE]
-> OMOP `visit_occurrence` has 852 rows compared to MIMIC's 275 admissions. The OHDSI conversion process creates additional outpatient visits from lab and specimen events that have no hospital admission ID. This is standard OHDSI behavior, not a data mismatch.
+<details>
+<summary><b>OMOP Visit Count (852 vs 275)</b></summary>
+
+OMOP `visit_occurrence` has 852 rows compared to MIMIC's 275 admissions. The OHDSI conversion process creates additional outpatient visits from lab and specimen events that have no hospital admission ID. This is standard OHDSI behavior, not a data mismatch.
+
+</details>
+
+<details>
+<summary><b>OMOP Column Name Case</b></summary>
+
+The PhysioNet MIMIC-OMOP reference dataset uses `valid_start_DATE` and `valid_end_DATE` (mixed case) in `2b_concept` and `2b_concept_relationship`. The official OMOP CDM DDL specifies these as lowercase (`valid_start_date`, `valid_end_date`). TinyEHR preserves the PhysioNet column names as-is, consistent with how MIMIC `procedureevents` preserves uppercase `ORIGINALAMOUNT` and `ORIGINALRATE` from the original data.
+
+</details>
 
 ---
 
-## Glossary
+<details>
+<summary><b>Glossary</b></summary>
 
 | Term | Definition |
 |------|-----------|
@@ -249,6 +271,8 @@ OMOP uses 64-bit hashed IDs (e.g., `person_id = 3589912774911670296`). Some ID c
 | **CMS** | Centers for Medicare & Medicaid Services: the US federal agency that administers Medicare and Medicaid |
 | **CDC** | Centers for Disease Control and Prevention |
 | **ICU** | Intensive Care Unit |
+
+</details>
 
 ---
 
